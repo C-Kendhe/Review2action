@@ -1,5 +1,6 @@
 import type { ApiResponse, AnalysisResult } from '../types';
-
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 export class ApiError extends Error {
   public code: string;
   public details?: unknown;
@@ -20,7 +21,7 @@ export const api = {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch('/api/reviews/analyze', {
+    const response = await fetch(`${API_BASE_URL}/api/reviews/analyze`, {
       method: 'POST',
       body: formData
     });
@@ -42,7 +43,7 @@ export const api = {
    * Fetch sample pre-analyzed dataset directly for 1-click test
    */
   async fetchSampleAnalysis(): Promise<AnalysisResult> {
-    const response = await fetch('/api/reviews/sample-data');
+    const response = await fetch(`${API_BASE_URL}/api/reviews/sample-data`);
     const data: ApiResponse<AnalysisResult> = await response.json();
 
     if (!response.ok || !data.success || !data.data) {
@@ -109,15 +110,14 @@ export const api = {
    * Get URL for downloading the sample SmartStock CSV file
    */
   getSmartStockSampleCsvUrl(): string {
-    return '/api/smartstock/sample-csv';
+    return `${API_BASE_URL}/api/smartstock/sample-csv`;
   },
-
   /**
    * Health check
    */
   async checkHealth(): Promise<boolean> {
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch(`${API_BASE_URL}/api/health`);
       const data = await res.json();
       return Boolean(data.success);
     } catch {
