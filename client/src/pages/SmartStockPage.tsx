@@ -15,16 +15,10 @@ import {
   FileSpreadsheet,
   Download,
   Sparkles,
-  RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Calendar,
-  Layers,
-  ArrowRight,
-  ShieldCheck,
   PackageCheck,
-  TrendingUp,
-  Cpu
+  TrendingUp
 } from 'lucide-react';
 
 interface SmartStockPageProps {
@@ -124,7 +118,7 @@ export const SmartStockPage: React.FC<SmartStockPageProps> = ({
   const handleTrySampleData = async () => {
     setIsLoading(true);
     setErrorMessage(null);
-    setLoadingMessage(`Loading 35-day synthetic sales history & forecasting next ${horizonDays} days...`);
+    setLoadingMessage(`Loading 92-day sales history & forecasting next ${horizonDays} days...`);
 
     try {
       const data = await api.fetchSmartStockSample(horizonDays);

@@ -6,14 +6,12 @@ const forecastingEngine_js_1 = require("./forecastingEngine.js");
 const inventoryService_js_1 = require("./inventoryService.js");
 const explanationProvider_js_1 = require("../providers/explanationProvider.js");
 class SmartStockService {
-    explanationProvider;
-    constructor() {
-        if (process.env.USE_AMD_LLM === 'true') {
-            this.explanationProvider = new explanationProvider_js_1.LlmExplanationProvider();
-        }
-        else {
-            this.explanationProvider = new explanationProvider_js_1.TemplateExplanationProvider();
-        }
+    llmProvider = new explanationProvider_js_1.LlmExplanationProvider();
+    templateProvider = new explanationProvider_js_1.TemplateExplanationProvider();
+    get explanationProvider() {
+        return process.env.USE_AMD_LLM === 'true'
+            ? this.llmProvider
+            : this.templateProvider;
     }
     /**
      * Main entrypoint: analyzes CSV content and returns complete demand forecast & replenishment plan
@@ -51,8 +49,8 @@ class SmartStockService {
             });
             // Run inventory calculations
             const inventory = inventoryService_js_1.InventoryService.calculateInventoryMetrics(productRows, forecast);
-            // Generate evidence-based explanation
-            const explanation = await this.explanationProvider.generateExplanation({
+            // Generate evidence-based explanation locally without blocking batch forecasting
+            const explanation = await this.templateProvider.generateExplanation({
                 product_id: productId,
                 product_name: productName,
                 category,
@@ -129,8 +127,11 @@ class SmartStockService {
             }
         };
     }
+    async explainProductLlm(context) {
+        return this.llmProvider.generateExplanation(context);
+    }
     getActiveProviderName() {
-        return this.explanationProvider.name;
+        return this.templateProvider.name;
     }
 }
 exports.SmartStockService = SmartStockService;

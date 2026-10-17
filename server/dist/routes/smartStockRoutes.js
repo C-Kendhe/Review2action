@@ -97,7 +97,7 @@ router.post('/forecast', upload.single('file'), async (req, res, next) => {
 });
 /**
  * GET /api/smartstock/sample-csv
- * Serves downloadable realistic sample CSV with 5 distinct product profiles
+ * Serves downloadable realistic sample CSV with distinct product profiles
  */
 router.get('/sample-csv', (_req, res) => {
     res.setHeader('Content-Type', 'text/csv');
@@ -105,10 +105,9 @@ router.get('/sample-csv', (_req, res) => {
     res.status(200).send(sampleSmartStock_js_1.SAMPLE_SMARTSTOCK_CSV);
 });
 /**
- * GET /api/smartstock/sample-forecast
- * Computes forecast on the bundled sample CSV for instant 1-click test
+ * Handler for computing forecast on the bundled sample CSV for instant 1-click test
  */
-router.get('/sample-forecast', async (req, res, next) => {
+const handleSampleForecast = async (req, res, next) => {
     try {
         const horizonDaysRaw = req.query?.horizonDays;
         const parsedHorizon = parseInt(String(horizonDaysRaw), 10);
@@ -117,6 +116,40 @@ router.get('/sample-forecast', async (req, res, next) => {
         res.status(200).json({
             success: true,
             data: result
+        });
+    }
+    catch (err) {
+        next(err);
+    }
+};
+/**
+ * GET /api/smartstock/sample-data
+ * GET /api/smartstock/sample-forecast
+ * Computes forecast on the bundled sample CSV for instant 1-click test
+ */
+router.get('/sample-data', handleSampleForecast);
+router.get('/sample-forecast', handleSampleForecast);
+/**
+ * POST /api/smartstock/explain
+ * Lazily generates an on-demand LLM explanation for an individual product without blocking batch forecast
+ */
+router.post('/explain', async (req, res, next) => {
+    try {
+        const { context } = req.body;
+        if (!context || !context.product_id) {
+            res.status(400).json({
+                success: false,
+                error: {
+                    code: 'MISSING_CONTEXT',
+                    message: 'Product context is required for on-demand explanation.'
+                }
+            });
+            return;
+        }
+        const explanation = await smartStockService_js_1.smartStockService.explainProductLlm(context);
+        res.status(200).json({
+            success: true,
+            data: { explanation }
         });
     }
     catch (err) {

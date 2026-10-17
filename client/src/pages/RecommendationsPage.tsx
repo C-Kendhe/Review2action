@@ -30,6 +30,26 @@ export const RecommendationsPage: React.FC<RecommendationsPageProps> = ({
   const [selectedOwner, setSelectedOwner] = useState<string>('All');
   const [copied, setCopied] = useState(false);
 
+  const allRecs = analysisResult?.recommendations;
+
+  // Filter recommendations
+  const filteredRecs = useMemo(() => {
+    if (!allRecs) return [];
+    return allRecs.filter((r) => {
+      if (selectedPriority !== 'All' && r.priority !== selectedPriority) return false;
+      if (selectedOwner !== 'All' && r.suggestedOwner !== selectedOwner) return false;
+      return true;
+    });
+  }, [allRecs, selectedPriority, selectedOwner]);
+
+  // Unique owners
+  const owners = useMemo(() => {
+    if (!allRecs) return [];
+    const set = new Set<string>();
+    allRecs.forEach((r) => set.add(r.suggestedOwner));
+    return Array.from(set);
+  }, [allRecs]);
+
   if (!analysisResult) {
     return (
       <EmptyState
@@ -43,22 +63,6 @@ export const RecommendationsPage: React.FC<RecommendationsPageProps> = ({
   }
 
   const { recommendations, metrics } = analysisResult;
-
-  // Filter recommendations
-  const filteredRecs = useMemo(() => {
-    return recommendations.filter((r) => {
-      if (selectedPriority !== 'All' && r.priority !== selectedPriority) return false;
-      if (selectedOwner !== 'All' && r.suggestedOwner !== selectedOwner) return false;
-      return true;
-    });
-  }, [recommendations, selectedPriority, selectedOwner]);
-
-  // Unique owners
-  const owners = useMemo(() => {
-    const set = new Set<string>();
-    recommendations.forEach((r) => set.add(r.suggestedOwner));
-    return Array.from(set);
-  }, [recommendations]);
 
   // Copy Markdown Report
   const handleCopyMarkdown = () => {

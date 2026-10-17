@@ -11,8 +11,8 @@
 - **Full-Stack Application**: Modern React + TypeScript + Vite frontend with Tailwind CSS and Recharts; robust Node.js + Express + TypeScript backend.
 - **Strict Evidence Guarantee**: Never hallucinates conclusions. Every recommendation includes quantified metrics, root-cause explanations, and verbatim customer review quotes.
 - **Zero API Key Requirement (Immediate Local Operation)**: Works out of the box with an intelligent, transparent rule-based sentiment lexicon and deterministic topic clustering engine.
-- **Pluggable AMD ROCm™ Architecture**: Built with an `AnalysisProvider` interface ready to connect to AMD Instinct™ MI300X / MI250 GPUs running ROCm-accelerated vLLM or TGI for deep LLM reasoning.
-- **Zero Cloud Data Leakage**: Ingested CSV reviews are processed entirely in memory. No persistent database or third-party cloud sharing is required.
+- **Pluggable AMD Architecture**: Integrated with AMD Token Factory's hosted API (`Qwen3.8-Flash-Next`) for strategic reasoning and recommendations, with automated local heuristic failover.
+- **In-Memory File Processing**: Ingested CSV files are processed entirely in server memory without persistent database storage. Server-side API keys are kept strictly protected.
 
 ---
 
@@ -207,30 +207,30 @@ export interface ExplanationProvider {
 1. **`TemplateExplanationProvider` (Default Local Mode)**:
    - Operates 100% locally and offline without external network or API keys.
    - Generates deterministic, evidence-backed narrative summaries strictly referencing verified computed numbers.
-2. **`LlmExplanationProvider` (Pluggable AMD ROCm Adapter)**:
-   - Connects to an AMD ROCm-accelerated inference cluster (e.g., AMD Instinct MI300X or MI250 GPUs running vLLM or TGI).
+2. **`LlmExplanationProvider` (AMD Token Factory Hosted API Adapter)**:
+   - Connects to AMD Token Factory's hosted API endpoint serving `Qwen3.8-Flash-Next`.
    - Constrained to strict JSON schemas (`{"explanation": "..."}`) with strict system instructions prohibiting data fabrication.
    - Automatically falls back gracefully to `TemplateExplanationProvider` if offline or timeout occurs.
 
-### Connecting Your AMD ROCm Inference Endpoint
+### Connecting Your AMD Token Factory Endpoint
 
-To point the application to an AMD Instinct-hosted model:
+To enable AMD Token Factory inference:
 
 1. Open `server/.env` (or copy from `server/.env.example`).
-2. Configure your AMD ROCm inference credentials:
+2. Configure your AMD Token Factory credentials:
 
 ```bash
 # Enable AMD LLM mode for both Review2Action and SmartStock AI
 USE_AMD_LLM=true
 
-# AMD ROCm vLLM or TGI Endpoint URL
-AMD_LLM_ENDPOINT="http://rocm-inference.internal:8000/v1/chat/completions"
+# AMD Token Factory Hosted API Endpoint URL
+AMD_LLM_ENDPOINT="https://api.tokenfactory.amd.com/v1"
 
-# Target ROCm-Optimized Model
-AMD_LLM_MODEL="meta-llama/Meta-Llama-3-70B-Instruct"
+# Target Model Hosted on AMD Token Factory
+AMD_LLM_MODEL="Qwen3.8-Flash-Next"
 
-# Server-Side API Bearer Token (Kept secure on backend)
-AMD_LLM_API_KEY="your_amd_rocm_token_here"
+# Server-Side API Bearer Token (Kept secure on backend, never sent to browser)
+AMD_LLM_API_KEY="your_amd_token_factory_api_key_here"
 ```
 
 3. Restart the backend (`npm run dev:server`).
@@ -246,8 +246,9 @@ AMD_LLM_API_KEY="your_amd_rocm_token_here"
 | `/api/reviews/sample-data` | `GET` | Review2Action | Runs 1-click analysis on bundled sample review dataset. |
 | `/api/reviews/sample-csv` | `GET` | Review2Action | Downloads realistic customer reviews sample CSV. |
 | `/api/smartstock/forecast` | `POST` | SmartStock | Validates sales CSV and generates demand forecasts & inventory metrics. |
-| `/api/smartstock/sample-forecast` | `GET` | SmartStock | Runs 1-click forecast on 35-day multi-product synthetic inventory dataset. |
-| `/api/smartstock/sample-csv` | `GET` | SmartStock | Downloads representative 5-product sales & inventory sample CSV. |
+| `/api/smartstock/sample-data` | `GET` | SmartStock | Runs 1-click forecast on 92-day multi-product synthetic inventory dataset. |
+| `/api/smartstock/sample-forecast` | `GET` | SmartStock | Alias for `/sample-data` computing forecast on sample dataset. |
+| `/api/smartstock/sample-csv` | `GET` | SmartStock | Downloads representative 6-product sales & inventory sample CSV. |
 
 ---
 
