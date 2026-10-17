@@ -107,7 +107,7 @@ flowchart LR
 
 ---
 
-## 📋 Supported CSV Column Schema
+## 📋 Supported CSV Column Schema.
 
 The CSV parser automatically cleans whitespace and normalizes headers using synonym detection:
 
