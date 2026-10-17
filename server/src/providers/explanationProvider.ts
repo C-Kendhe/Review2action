@@ -64,23 +64,28 @@ export class TemplateExplanationProvider implements ExplanationProvider {
 }
 
 /**
- * Pluggable AMD ROCm / LLM Explanation Adapter.
- * Connects to an AMD Instinct MI300X / vLLM / OpenAI-compatible endpoint.
+ * AMD Token Factory OpenAI-Compatible LLM Explanation Adapter.
+ * Connects to AMD Token Factory serving Qwen3.8-Flash-Next on AMD Instinct ROCm architecture.
  * Strictly constrained to computed inputs; validates JSON; falls back to template provider if offline.
  */
 export class LlmExplanationProvider implements ExplanationProvider {
-  public readonly name = 'AMD ROCm LLM Explanation Provider';
+  public readonly name = 'AMD Token Factory LLM Explanation Provider';
   private templateFallback = new TemplateExplanationProvider();
 
   public async generateExplanation(context: ExplanationContext): Promise<string> {
-    const endpoint = process.env.AMD_LLM_ENDPOINT;
-    const apiKey = process.env.AMD_LLM_API_KEY;
-    const model = process.env.AMD_LLM_MODEL || 'meta-llama/Meta-Llama-3-70B-Instruct';
+    const rawEndpoint = process.env.AMD_LLM_ENDPOINT?.trim();
+    const apiKey = process.env.AMD_LLM_API_KEY?.trim();
+    const model = process.env.AMD_LLM_MODEL?.trim() || 'Qwen3.8-Flash-Next';
 
     // If endpoint not configured, gracefully use deterministic template
-    if (!endpoint) {
+    if (!rawEndpoint) {
       return this.templateFallback.generateExplanation(context);
     }
+
+    // Normalize OpenAI-compatible endpoint URL
+    const endpoint = rawEndpoint.endsWith('/chat/completions')
+      ? rawEndpoint
+      : `${rawEndpoint.replace(/\/+$/, '')}/chat/completions`;
 
     try {
       const payload = {
@@ -89,7 +94,7 @@ export class LlmExplanationProvider implements ExplanationProvider {
           {
             role: 'system',
             content:
-              'You are an expert e-commerce supply chain analyst for Review2Action & SmartStock AI running on AMD Instinct ROCm architecture. ' +
+              'You are an expert e-commerce supply chain analyst for Review2Action & SmartStock AI running on AMD Instinct ROCm architecture and AMD Token Factory. ' +
               'Write a concise, 2-to-3 sentence executive explanation for the product inventory situation. ' +
               'CRITICAL RULES: Do NOT invent, hallucinate, or alter any numbers. Use ONLY the supplied numbers. Return ONLY valid JSON in the format: {"explanation": "..."}.'
           },
@@ -112,41 +117,60 @@ export class LlmExplanationProvider implements ExplanationProvider {
           }
         ],
         temperature: 0.1,
-        max_tokens: 200,
+        reasoning_effort: 'low',
+        max_tokens: 1000,
         response_format: { type: 'json_object' }
       };
 
+      const startTime = Date.now();
+      const sanitizedEndpoint = rawEndpoint.split('?')[0];
+      console.info(
+        `[Explanation-AMD] Request started for product ${context.product_id} (${context.product_name}) via ${sanitizedEndpoint}...`
+      );
+
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 6000); // 6s timeout
+      const timeout = setTimeout(() => controller.abort(), 120000); // 120s timeout
 
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-        },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
 
-      clearTimeout(timeout);
+      let res: Response;
+      try {
+        res = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const elapsedMs = Date.now() - startTime;
 
       if (!res.ok) {
-        console.warn(`[SmartStock LLM] Inference endpoint returned HTTP ${res.status}. Falling back to template.`);
+        console.warn(`[Explanation-AMD] HTTP ${res.status} returned after ${elapsedMs}ms. Falling back to deterministic template.`);
         return this.templateFallback.generateExplanation(context);
       }
 
       const data = await res.json() as any;
       const rawText = data?.choices?.[0]?.message?.content || '';
-      const parsed = JSON.parse(rawText);
+      const cleanedText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleanedText);
 
       if (parsed && typeof parsed.explanation === 'string' && parsed.explanation.trim()) {
+        console.info(`[Explanation-AMD] Succeeded in ${elapsedMs}ms (${(elapsedMs / 1000).toFixed(1)}s) for product ${context.product_id}.`);
         return parsed.explanation.trim();
       }
 
+      console.warn(`[Explanation-AMD] Invalid schema returned after ${elapsedMs}ms. Falling back to template.`);
       return this.templateFallback.generateExplanation(context);
-    } catch (err) {
-      console.warn('[SmartStock LLM] Inference call failed or timed out. Gracefully falling back to template.', err);
+    } catch (err: any) {
+      console.warn(`[Explanation-AMD] Inference call failed or timed out (${err?.message || 'unknown'}). Gracefully falling back to template.`);
       return this.templateFallback.generateExplanation(context);
     }
   }

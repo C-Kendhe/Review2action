@@ -138,6 +138,34 @@ router.get('/sample-forecast', async (req: Request, res: Response, next: NextFun
 });
 
 /**
+ * POST /api/smartstock/explain
+ * Lazily generates an on-demand LLM explanation for an individual product without blocking batch forecast
+ */
+router.post('/explain', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { context } = req.body;
+    if (!context || !context.product_id) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'MISSING_CONTEXT',
+          message: 'Product context is required for on-demand explanation.'
+        }
+      });
+      return;
+    }
+
+    const explanation = await smartStockService.explainProductLlm(context);
+    res.status(200).json({
+      success: true,
+      data: { explanation }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /api/smartstock/health
  */
 router.get('/health', (_req: Request, res: Response): void => {

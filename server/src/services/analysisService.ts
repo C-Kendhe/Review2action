@@ -4,17 +4,15 @@ import { LocalHeuristicAnalysisProvider } from '../providers/localHeuristicProvi
 import { AmdLlmAnalysisProvider } from '../providers/amdLlmProvider.js';
 
 export class AnalysisService {
-  private provider: AnalysisProvider;
+  private amdProvider = new AmdLlmAnalysisProvider();
+  private localProvider = new LocalHeuristicAnalysisProvider();
   private inMemoryCache: Map<string, AnalysisResult> = new Map();
 
-  constructor() {
-    // Select provider based on environment configuration
-    const useAmdLlm = process.env.USE_AMD_LLM === 'true' || Boolean(process.env.AMD_LLM_ENDPOINT);
-    if (useAmdLlm) {
-      this.provider = new AmdLlmAnalysisProvider();
-    } else {
-      this.provider = new LocalHeuristicAnalysisProvider();
-    }
+  private get provider(): AnalysisProvider {
+    // Select AmdLlmAnalysisProvider strictly when USE_AMD_LLM=true, otherwise select LocalHeuristicAnalysisProvider
+    return process.env.USE_AMD_LLM === 'true'
+      ? this.amdProvider
+      : this.localProvider;
   }
 
   public getActiveProviderName(): string {

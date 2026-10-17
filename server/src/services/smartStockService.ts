@@ -16,14 +16,13 @@ import {
 } from '../providers/explanationProvider.js';
 
 export class SmartStockService {
-  private explanationProvider: ExplanationProvider;
+  private llmProvider = new LlmExplanationProvider();
+  private templateProvider = new TemplateExplanationProvider();
 
-  constructor() {
-    if (process.env.USE_AMD_LLM === 'true') {
-      this.explanationProvider = new LlmExplanationProvider();
-    } else {
-      this.explanationProvider = new TemplateExplanationProvider();
-    }
+  private get explanationProvider(): ExplanationProvider {
+    return process.env.USE_AMD_LLM === 'true'
+      ? this.llmProvider
+      : this.templateProvider;
   }
 
   /**
@@ -74,8 +73,8 @@ export class SmartStockService {
       // Run inventory calculations
       const inventory = InventoryService.calculateInventoryMetrics(productRows, forecast);
 
-      // Generate evidence-based explanation
-      const explanation = await this.explanationProvider.generateExplanation({
+      // Generate evidence-based explanation locally without blocking batch forecasting
+      const explanation = await this.templateProvider.generateExplanation({
         product_id: productId,
         product_name: productName,
         category,
@@ -161,8 +160,12 @@ export class SmartStockService {
     };
   }
 
+  public async explainProductLlm(context: import('../providers/explanationProvider.js').ExplanationContext): Promise<string> {
+    return this.llmProvider.generateExplanation(context);
+  }
+
   public getActiveProviderName(): string {
-    return this.explanationProvider.name;
+    return this.templateProvider.name;
   }
 }
 

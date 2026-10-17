@@ -1,21 +1,30 @@
 import {
   NormalizedReview,
-  AnalysisResult,
+  Recommendation,
   ProviderInfo
 } from '../types/index.js';
 import { AnalysisOutput, AnalysisProvider } from './analysisProvider.js';
 import { LocalHeuristicAnalysisProvider } from './localHeuristicProvider.js';
 
+const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low']);
+const VALID_OWNERS = new Set([
+  'Operations',
+  'Product',
+  'Customer Support',
+  'Marketing',
+  'Quality Engineering'
+]);
+
 /**
- * Adapter for AMD-hosted LLM inference.
+ * Adapter for AMD Token Factory OpenAI-compatible LLM inference.
  *
  * Supported Backend Environments:
- * - AMD ROCm vLLM / TGI OpenAI-compatible API serving models such as
- *   Meta-Llama-3-70B-Instruct or Mistral on AMD Instinct MI300X / MI250 GPUs.
+ * - AMD Token Factory OpenAI-compatible API serving models such as
+ *   Qwen3.8-Flash-Next on AMD Instinct ROCm architecture.
  *
  * Environment Variables:
- * - AMD_LLM_ENDPOINT: e.g. "https://rocm-inference.amd.internal/v1/chat/completions"
- * - AMD_LLM_MODEL: e.g. "meta-llama/Meta-Llama-3-70B-Instruct"
+ * - AMD_LLM_ENDPOINT: e.g. "https://developer.amd.com.cn/radeon/api/v1/chat/completions"
+ * - AMD_LLM_MODEL: e.g. "Qwen3.8-Flash-Next"
  * - AMD_LLM_API_KEY: Secure token passed only on server side
  */
 export class AmdLlmAnalysisProvider implements AnalysisProvider {
@@ -23,168 +32,285 @@ export class AmdLlmAnalysisProvider implements AnalysisProvider {
   private fallbackProvider = new LocalHeuristicAnalysisProvider();
 
   public async analyze(reviews: NormalizedReview[]): Promise<AnalysisOutput> {
-    const endpoint = process.env.AMD_LLM_ENDPOINT;
-    const model = process.env.AMD_LLM_MODEL || 'meta-llama/Meta-Llama-3-70B-Instruct';
-    const apiKey = process.env.AMD_LLM_API_KEY;
+    const rawEndpoint = process.env.AMD_LLM_ENDPOINT?.trim();
+    const model = process.env.AMD_LLM_MODEL?.trim() || 'Qwen3.8-Flash-Next';
+    const apiKey = process.env.AMD_LLM_API_KEY?.trim();
 
-    // If AMD endpoint is not configured in this environment, execute robust local heuristic analysis
-    // and provide clear provider status information
-    if (!endpoint) {
+    // 1. Calculate deterministic baseline metrics locally first
+    // This provides exact mathematics, sentiment over time, star distribution,
+    // and full review-level classifications with zero hallucination and zero token waste.
+    const baseAnalysis = await this.fallbackProvider.analyze(reviews);
+
+    // If AMD endpoint is not configured in this environment, return local analysis
+    if (!rawEndpoint) {
       console.info(
         '[AmdLlmAnalysisProvider] AMD_LLM_ENDPOINT not configured. Operating in pluggable local mode.'
       );
-      const localResult = await this.fallbackProvider.analyze(reviews);
       return {
-        ...localResult,
+        ...baseAnalysis,
         providerInfo: {
-          providerName: 'AMD Instinct Acceleration Architecture (Local Fallback Active)',
+          providerName: 'AMD Token Factory (Local Fallback Active)',
           model: `${model} (Ready for endpoint binding)`,
           isFallbackOrLocal: true,
           disclaimer:
-            'Operating in local heuristic mode. Set AMD_LLM_ENDPOINT and AMD_LLM_API_KEY in server environment to enable AMD ROCm GPU-accelerated LLM reasoning.',
+            'Operating in local heuristic mode. Set AMD_LLM_ENDPOINT and AMD_LLM_API_KEY in server environment to enable AMD Token Factory GPU-accelerated LLM reasoning.',
           amdIntegrationReady: true
         }
       };
     }
 
+    // Normalize OpenAI-compatible endpoint URL
+    const endpoint = rawEndpoint.endsWith('/chat/completions')
+      ? rawEndpoint
+      : `${rawEndpoint.replace(/\/+$/, '')}/chat/completions`;
+
+    const sanitizedEndpoint = rawEndpoint.split('?')[0];
+    let errorCategory = 'Inference error';
+    const startTime = Date.now();
+
+    console.info(
+      `[ReviewAnalysis-AMD] Starting inference request to ${sanitizedEndpoint} for ${reviews.length} reviews (model: ${model})...`
+    );
+
     try {
-      // Prompt construction for strict JSON return grounded solely on provided reviews
-      const prompt = this.buildPrompt(reviews);
+      // 2. Build concise, information-dense prompt for AMD Token Factory
+      // Focusing the LLM on strategic synthesis avoids asking the model to regenerate
+      // review text or compute arithmetic that is already calculated locally.
+      const prompt = this.buildRecommendationsPrompt(baseAnalysis, reviews);
 
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.1, // low temperature to prevent hallucination
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content:
-                'You are an executive e-commerce review analysis engine running on AMD Instinct ROCm architecture. ' +
-                'CRITICAL RULES: Output strictly valid JSON matching the requested schema. ' +
-                'NEVER invent facts or statistics. All metrics and recommendations MUST be directly grounded in the provided review sample.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ]
-        })
-      });
+      // 120s timeout to allow large models on AMD cloud inference to complete reliably
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
 
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          signal: controller.signal,
+          body: JSON.stringify({
+            model,
+            reasoning_effort: 'low', // avoids model default xhigh reasoning effort
+            temperature: 0.1, // low temperature for grounded executive insights
+            max_tokens: 2500, // compact token budget for 3-5 recommendations with low reasoning
+            response_format: { type: 'json_object' },
+            messages: [
+              {
+                role: 'user',
+                content: prompt
+              }
+            ]
+          })
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      const elapsedMs = Date.now() - startTime;
+
+      // Check HTTP response status
       if (!response.ok) {
-        throw new Error(`AMD LLM endpoint responded with HTTP ${response.status}: ${response.statusText}`);
+        errorCategory = `HTTP ${response.status} (${response.statusText || 'Error'})`;
+        throw new Error(`AMD Token Factory endpoint responded with HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const rawJson = await response.json();
-      const content = rawJson.choices?.[0]?.message?.content;
-      if (!content) {
-        throw new Error('Empty response payload from AMD LLM inference server.');
+      let rawJson: any;
+      try {
+        rawJson = await response.json();
+      } catch (jsonErr: any) {
+        errorCategory = 'Malformed HTTP response JSON';
+        throw new Error(`Failed to parse HTTP response as JSON from AMD inference server: ${jsonErr.message}`);
       }
 
-      const parsedData = JSON.parse(content);
-      // Validate and return parsed LLM structure
+      const choice = rawJson?.choices?.[0];
+      const content = choice?.message?.content;
+      if (!content || typeof content !== 'string' || content.trim().length === 0) {
+        if (choice?.finish_reason === 'length') {
+          errorCategory = 'Max tokens exceeded before content completion';
+          throw new Error('AMD inference reached token limit during reasoning before completing output JSON.');
+        }
+        errorCategory = 'Empty payload';
+        throw new Error('Empty or invalid choices payload from AMD Token Factory inference server.');
+      }
+
+      // Strip optional markdown code fences if returned by model
+      const cleanedContent = content
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      let parsedData: any;
+      try {
+        parsedData = JSON.parse(cleanedContent);
+      } catch (parseErr: any) {
+        errorCategory = 'Malformed model JSON';
+        throw new Error(`Failed to parse model output content as JSON: ${parseErr.message}`);
+      }
+
+      // Validate schema for recommendations
+      const validatedRecs = this.validateAndNormalizeRecommendations(parsedData?.recommendations);
+      if (!validatedRecs || validatedRecs.length === 0) {
+        errorCategory = 'Schema validation failure';
+        throw new Error('AMD model returned an empty or invalid recommendations array schema.');
+      }
+
+      // SUCCESS: Only claim AMD inference succeeded when actual API response succeeds and validates
+      console.info(
+        `[ReviewAnalysis-AMD] Inference succeeded in ${elapsedMs}ms (${(elapsedMs / 1000).toFixed(1)}s) via ${sanitizedEndpoint} with ${validatedRecs.length} recommendations.`
+      );
+
       return {
-        ...parsedData,
+        metrics: baseAnalysis.metrics,
+        sentiment: baseAnalysis.sentiment,
+        topics: baseAnalysis.topics,
+        recommendations: validatedRecs,
+        reviews: baseAnalysis.reviews,
         providerInfo: {
-          providerName: 'AMD ROCm Instinct Acceleration Engine',
-          model,
+          providerName: 'AMD Token Factory (ROCm Instinct Acceleration)',
+          model: `${model} (AMD ROCm Compute)`,
           isFallbackOrLocal: false,
-          disclaimer: 'Analysis generated using AMD-hosted LLM inference running on ROCm compute.',
+          disclaimer: 'Analysis generated using AMD Token Factory Qwen3.8-Flash-Next on AMD Instinct ROCm compute.',
           amdIntegrationReady: true
         }
       };
     } catch (err: any) {
-      console.warn(
-        `[AmdLlmAnalysisProvider] Inference call to ${endpoint} failed: ${err.message}. Falling back to local heuristic provider.`
-      );
-      const localResult = await this.fallbackProvider.analyze(reviews);
+      const elapsedMs = Date.now() - startTime;
+
+      // Categorize and log error without leaking secrets or credentials
+      if (err?.name === 'AbortError' || err?.message?.toLowerCase().includes('abort')) {
+        errorCategory = 'Timeout (exceeded 120s)';
+        console.warn(
+          `[ReviewAnalysis-AMD] Inference call to ${sanitizedEndpoint} timed out after ${elapsedMs}ms (${(elapsedMs / 1000).toFixed(1)}s). Falling back to local heuristic provider.`
+        );
+      } else {
+        console.warn(
+          `[ReviewAnalysis-AMD] Inference call to ${sanitizedEndpoint} failed [${errorCategory}] after ${elapsedMs}ms: ${err.message}. Falling back to local heuristic provider.`
+        );
+      }
+
+      // Gracefully fall back to local heuristic recommendations
       return {
-        ...localResult,
+        ...baseAnalysis,
         providerInfo: {
-          providerName: 'AMD Instinct Acceleration Architecture (Failover to Local)',
-          model: `Fallback after: ${err.message}`,
+          providerName: 'AMD Token Factory (Failover to Local)',
+          model: `${model} (Local Fallback Active)`,
           isFallbackOrLocal: true,
-          disclaimer:
-            'External AMD LLM call failed or timed out. Gracefully fell back to deterministic local heuristics.',
+          disclaimer: `External AMD Token Factory inference unavailable (${errorCategory}). Gracefully fell back to deterministic local heuristics.`,
           amdIntegrationReady: true
         }
       };
     }
   }
 
-  private buildPrompt(reviews: NormalizedReview[]): string {
-    const compactReviews = reviews.slice(0, 50).map(r => ({
-      id: r.review_id,
-      text: r.review_text,
-      rating: r.rating,
-      product: r.product_name,
-      date: r.review_date
-    }));
+  /**
+   * Constructs an information-dense prompt for executive recommendation generation.
+   * Feeds pre-calculated metrics, top topic frequencies, and real customer excerpts.
+   */
+  private buildRecommendationsPrompt(
+    baseAnalysis: AnalysisOutput,
+    reviews: NormalizedReview[]
+  ): string {
+    const { metrics } = baseAnalysis;
 
-    return `Analyze the following customer reviews and produce strict JSON conforming to this schema:
+    // Extract real customer pain points from negative reviews
+    const painPoints = reviews
+      .filter(r => r.rating !== null && r.rating <= 2)
+      .slice(0, 3)
+      .map(r => `[Rating: ${r.rating}★] "${this.truncate(r.review_text, 100)}"`)
+      .join('\n');
+
+    return `Based on these ${metrics.totalValidReviews} customer reviews (${metrics.sentimentPercentages.negative}% negative, top issue: ${metrics.topNegativeTopic ?? 'General Feedback'}), generate exactly 3 strategic recommendations in valid JSON.
+
+CUSTOMER PAIN POINTS:
+${painPoints || 'No severe complaints'}
+
+JSON SCHEMA:
 {
-  "metrics": {
-    "totalValidReviews": number,
-    "sentimentBreakdown": { "positive": number, "neutral": number, "negative": number },
-    "sentimentPercentages": { "positive": number, "neutral": number, "negative": number },
-    "averageRating": number | null,
-    "ratingsDistribution": { "1": number, "2": number, "3": number, "4": number, "5": number } | null,
-    "topTopic": string,
-    "topNegativeTopic": string | null,
-    "topPositiveTopic": string | null
-  },
-  "sentiment": {
-    "averageScore": number (-1.0 to 1.0),
-    "sentimentOverTime": [ { "date": string, "positive": number, "neutral": number, "negative": number, "averageRating": number, "count": number } ]
-  },
-  "topics": [
-    {
-      "name": string,
-      "category": string,
-      "count": number,
-      "percentage": number,
-      "sentimentBreakdown": { "positive": number, "neutral": number, "negative": number },
-      "negativePercentage": number,
-      "averageRating": number | null,
-      "sampleSnippets": string[]
-    }
-  ],
   "recommendations": [
     {
-      "id": string,
-      "priority": "High" | "Medium" | "Low",
-      "title": string,
-      "whyItMatters": string,
-      "supportingMetrics": string,
-      "supportingExcerpts": string[],
-      "expectedImpact": string,
-      "suggestedOwner": "Operations" | "Product" | "Customer Support" | "Marketing" | "Quality Engineering"
-    }
-  ],
-  "reviews": [
-    {
-      "review_id": string,
-      "review_text": string,
-      "rating": number | null,
-      "product_name": string | null,
-      "review_date": string | null,
-      "review_title": string | null,
-      "sentiment": "Positive" | "Neutral" | "Negative",
-      "sentimentScore": number,
-      "confidence": number,
-      "detectedTopics": string[],
-      "matchedKeywords": string[]
+      "id": "rec-1",
+      "priority": "High",
+      "title": "Action title",
+      "whyItMatters": "Reason",
+      "supportingMetrics": "Metrics",
+      "supportingExcerpts": ["Quote"],
+      "expectedImpact": "Impact",
+      "suggestedOwner": "Operations"
     }
   ]
-}
+}`;
+  }
 
-REVIEWS:
-${JSON.stringify(compactReviews, null, 2)}`;
+  /**
+   * Validates and normalizes recommendation items from LLM JSON output.
+   */
+  private validateAndNormalizeRecommendations(rawList: any): Recommendation[] | null {
+    if (!Array.isArray(rawList) || rawList.length === 0) {
+      return null;
+    }
+
+    const validated: Recommendation[] = [];
+
+    for (let i = 0; i < rawList.length; i++) {
+      const item = rawList[i];
+      if (!item || typeof item !== 'object') continue;
+
+      const title = typeof item.title === 'string' && item.title.trim() ? item.title.trim() : null;
+      const whyItMatters = typeof item.whyItMatters === 'string' && item.whyItMatters.trim() ? item.whyItMatters.trim() : null;
+
+      if (!title || !whyItMatters) continue;
+
+      const priorityRaw = String(item.priority || 'Medium').trim();
+      const priority = (VALID_PRIORITIES.has(priorityRaw) ? priorityRaw : 'Medium') as 'High' | 'Medium' | 'Low';
+
+      const ownerRaw = String(item.suggestedOwner || 'Operations').trim();
+      const suggestedOwner = (VALID_OWNERS.has(ownerRaw) ? ownerRaw : 'Operations') as
+        | 'Operations'
+        | 'Product'
+        | 'Customer Support'
+        | 'Marketing'
+        | 'Quality Engineering';
+
+      const supportingMetrics = typeof item.supportingMetrics === 'string' && item.supportingMetrics.trim()
+        ? item.supportingMetrics.trim()
+        : 'Identified through customer sentiment patterns.';
+
+      const expectedImpact = typeof item.expectedImpact === 'string' && item.expectedImpact.trim()
+        ? item.expectedImpact.trim()
+        : 'Improved customer retention and satisfaction.';
+
+      const supportingExcerpts: string[] = Array.isArray(item.supportingExcerpts)
+        ? item.supportingExcerpts
+          .filter((e: any) => typeof e === 'string' && e.trim().length > 0)
+          .map((e: string) => e.trim())
+          .slice(0, 3)
+        : [];
+
+      validated.push({
+        id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `rec-amd-${i + 1}`,
+        priority,
+        title,
+        whyItMatters,
+        supportingMetrics,
+        supportingExcerpts,
+        expectedImpact,
+        suggestedOwner
+      });
+    }
+
+    return validated.length > 0 ? validated : null;
+  }
+
+  private truncate(text: string, maxLen: number): string {
+    const clean = text.replace(/[\r\n\t]+/g, ' ').trim();
+    if (clean.length <= maxLen) return clean;
+    return clean.slice(0, maxLen - 3) + '...';
   }
 }
