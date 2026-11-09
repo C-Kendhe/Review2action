@@ -8,6 +8,7 @@ import { InsightsPage } from './pages/InsightsPage';
 import { RecommendationsPage } from './pages/RecommendationsPage';
 import { SmartStockPage } from './pages/SmartStockPage';
 import { AboutPage } from './pages/AboutPage';
+import { LandingPage } from './pages/LandingPage';
 import { api } from './services/api';
 import type { AnalysisResult, PageTab, SmartStockForecastResult } from './types';
 import { AlertCircle, CheckCircle, X } from 'lucide-react';
@@ -19,6 +20,7 @@ export function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('Processing...');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [showLandingPage, setShowLandingPage] = useState<boolean>(true);
 
   // Notification Toast
   const [toast, setToast] = useState<{
@@ -35,6 +37,7 @@ export function App() {
 
   // Load sample dataset directly
   const handleLoadSample = async () => {
+    setShowLandingPage(false);
     setIsLoading(true);
     setLoadingMessage('Loading & analyzing e-commerce sample reviews dataset...');
     try {
@@ -48,6 +51,22 @@ export function App() {
       setIsLoading(false);
     }
   };
+
+  const openWorkspace = (tab: PageTab = 'dashboard') => {
+    setCurrentTab(tab);
+    setShowLandingPage(false);
+  };
+
+  if (showLandingPage) {
+    return (
+      <LandingPage
+        onOpenWorkspace={() => openWorkspace('dashboard')}
+        onUpload={() => openWorkspace('upload')}
+        onExploreSample={handleLoadSample}
+        isLoading={isLoading}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
@@ -81,6 +100,7 @@ export function App() {
       <Header
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
+        onGoHome={() => setShowLandingPage(true)}
         analysisResult={analysisResult}
         onLoadSample={handleLoadSample}
         isLoading={isLoading}

@@ -5,6 +5,7 @@ import type { AnalysisResult, PageTab } from '../types';
 interface HeaderProps {
   currentTab: PageTab;
   setCurrentTab: (tab: PageTab) => void;
+  onGoHome: () => void;
   analysisResult: AnalysisResult | null;
   onLoadSample: () => void;
   isLoading: boolean;
@@ -14,6 +15,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   setCurrentTab,
+  onGoHome,
   analysisResult,
   onLoadSample,
   isLoading,
@@ -41,7 +43,9 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => setCurrentTab('dashboard')}
+              onClick={onGoHome}
+              aria-label="Return to homepage"
+              title="Return to homepage"
               className="flex items-center gap-2.5 text-left group transition cursor-pointer"
             >
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#ED1C24] to-rose-500 flex items-center justify-center text-white shadow-sm shadow-rose-500/20 group-hover:scale-105 transition-transform">
